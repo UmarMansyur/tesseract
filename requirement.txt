@@ -1,0 +1,13 @@
+numpy
+opencv-python
+Pillow
+click==8.1.7
+jiwer==3.0.5
+Levenshtein==0.26.1
+numpy==2.2.0
+opencv-python==4.10.0.84
+packaging==24.2
+pillow==11.0.0
+pytesseract==0.3.13
+python-Levenshtein==0.26.1
+RapidFuzz==3.10.1
