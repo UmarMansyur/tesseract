@@ -5,7 +5,7 @@ import numpy as np
 import math
 
 class Rule:
-  def __init__(self, input_path, output_path):
+  def __init__(self, input_path: str = None, output_path: str = None):
     self.input_path = input_path
     self.output_path = output_path
     
@@ -15,41 +15,19 @@ class Rule:
   def set_output_path(self, output_path: str):
     self.output_path = output_path
   
-  def rescale_image(self, target_dpi=300):
+  def rescale_image(self, image, target_dpi=300):
+    """Modified to accept direct image input"""
     try:
-      with Image.open(self.input_path) as img:
-        original_dpi = img.info.get('dpi', (96, 96))[0]
+        original_dpi = 96  # Default DPI
+        scaling_factor = target_dpi / original_dpi
+        height, width = image.shape[:2]
+        new_width = int(width * scaling_factor)
+        new_height = int(height * scaling_factor)
+        return cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
     except Exception as e:
-      original_dpi = 96
-    image = cv2.imread(self.input_path)
-    scaling_factor = target_dpi / original_dpi
-    height, width = image.shape[:2]
-    new_width = int(width * scaling_factor)
-    new_height = int(height * scaling_factor)
-    rescaled_image = cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
-    return rescaled_image
-  
-  def get_gray_image(self):
-    image = cv2.imread(self.input_path)
-    gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    return gray_image
-  
-  def adaptive_threshold(self):
-    gray_image = self.get_gray_image()
-    adaptive_thresh_image = cv2.adaptiveThreshold(gray_image, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-                                                cv2.THRESH_BINARY, 11, 2)
-    return adaptive_thresh_image
-  
-  def binarize_image(self):
-    gray_image = self.get_gray_image()
-    _, binary_image = cv2.threshold(gray_image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    return binary_image
-  
-  def remove_noise(self):
-    image = cv2.imread(self.input_path, cv2.IMREAD_GRAYSCALE)
-    noise_removed_image = cv2.medianBlur(image, 3)
-    return noise_removed_image
-  
+        print(f"Error in rescale_image: {e}")
+        return image
+    
   def compute_skew(self, src_img):
     if len(src_img.shape) == 3:
       h, w, _ = src_img.shape
@@ -60,7 +38,6 @@ class Rule:
       return 0.0
     
     img = cv2.medianBlur(src_img, 3)
-    
     edges = cv2.Canny(img, threshold1=30, threshold2=100, apertureSize=3, L2gradient=True)
     lines = cv2.HoughLinesP(edges, 1, math.pi / 180, 30, minLineLength=w / 4.0, maxLineGap=h / 4.0)
     
@@ -96,72 +73,69 @@ class Rule:
     
     result = cv2.warpAffine(image, rot_mat, (bound_w, bound_h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
     return result
-
-  def deskew_image(self):
-    image = cv2.imread(self.input_path)
-    angle = self.compute_skew(image)
-    deskewed_image = self.rotate_image(image, angle)
-    return deskewed_image
   
-  def remove_border(self):
-    image = self.get_gray_image()
-    _, thresholded_image = cv2.threshold(image, 128, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
-    contours, _ = cv2.findContours(thresholded_image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if contours:
-      max_contour = max(contours, key=cv2.contourArea)
-      x, y, w, h = cv2.boundingRect(max_contour)
-      cropped_image = image[y:y+h, x:x+w]
-      return cropped_image
-    return image
-  
-  def get_text_coordinates(self):
-    image = self.remove_border()
+  def get_text_coordinates(self, image):
+    """Modified to accept direct image input"""
     text_coords = pytesseract.image_to_data(image, output_type=pytesseract.Output.DICT)
     return text_coords
-  
-  def enhance_contrast(self):
-    """Meningkatkan contrast teks"""
-    image = self.get_gray_image()
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
-    enhanced = clahe.apply(image)
-    return enhanced
 
-  def denoise_strong(self):
-      """Denoising yang lebih kuat untuk comic-style image"""
-      image = cv2.imread(self.input_path)
-      denoised = cv2.fastNlMeansDenoisingColored(image, None, 10, 10, 7, 21)
-      return cv2.cvtColor(denoised, cv2.COLOR_BGR2GRAY)
-
-  def detect_text_regions(self):
-      """Deteksi dan isolasi region teks"""
-      image = self.get_gray_image()
-      # Menggunakan morphological operations
-      kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5,5))
-      grad = cv2.morphologyEx(image, cv2.MORPH_GRADIENT, kernel)
-      _, bw = cv2.threshold(grad, 0.0, 255.0, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
-      return bw
+  def detect_text_regions(self, image):
+    """Modified to accept direct image input"""
+    # Menggunakan morphological operations
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5,5))
+    grad = cv2.morphologyEx(image, cv2.MORPH_GRADIENT, kernel)
+    _, bw = cv2.threshold(grad, 0.0, 255.0, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
+    return bw
   
-  def run(self, method: int):
-    if method == 1:
-      image = self.rescale_image()
-    elif method == 2:
-      image = self.adaptive_threshold()
-    elif method == 3:
-      image = self.binarize_image()
-    elif method == 4:
-      image = self.remove_noise()
-    elif method == 5:
-      image = self.deskew_image()
-    elif method == 6:
-      image = self.remove_border()
-    elif method == 7:
-      image = self.enhance_contrast()
-    elif method == 8:
-      image = self.denoise_strong()
-    elif method == 9:
-      image = self.detect_text_regions()
+  def run(self, rule: int, image = None) -> np.ndarray:
+    """Modified to accept direct image input"""
+    if image is None and self.input_path:
+        image = cv2.imread(self.input_path)
+    
+    # Ensure image is in correct format for each rule
+    if len(image.shape) == 2:  # If grayscale, convert to BGR
+        image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+    
+    # Process image based on rule number
+    if rule == 1:
+        processed_image = self.rescale_image(image)
+    elif rule == 2:
+        processed_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    elif rule == 3:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        processed_image = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                                             cv2.THRESH_BINARY, 11, 2)
+    elif rule == 4:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        _, processed_image = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    elif rule == 5:
+        processed_image = cv2.medianBlur(image, 3)
+    elif rule == 6:
+        angle = self.compute_skew(image)
+        processed_image = self.rotate_image(image, angle)
+    elif rule == 7:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        _, thresh = cv2.threshold(gray, 128, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
+        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if contours:
+            max_contour = max(contours, key=cv2.contourArea)
+            x, y, w, h = cv2.boundingRect(max_contour)
+            processed_image = image[y:y+h, x:x+w]
+        else:
+            processed_image = image
+    elif rule == 8:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+        processed_image = clahe.apply(gray)
+    elif rule == 9:
+        # Ensure image is in color format for denoising
+        if len(image.shape) == 2:
+            image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+        processed_image = cv2.fastNlMeansDenoisingColored(image, None, 10, 10, 7, 21)
     else:
-      raise ValueError("Invalid method")
-    # simpan imagenya ya
-    cv2.imwrite(self.output_path, image)
-    return image
+        processed_image = image
+    
+    if self.output_path:
+        cv2.imwrite(self.output_path, processed_image)
+    
+    return processed_image

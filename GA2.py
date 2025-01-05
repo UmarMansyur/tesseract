@@ -8,30 +8,26 @@ from multiprocessing import Pool
 from functools import lru_cache
 
 class GeneticAlgorithm:
-    def __init__(self, input_paths: List[str], output_paths: List[str], ground_truth_paths: List[str] = None,
-                 population_size: int = 80, generations: int = 100):
-        self.input_paths = input_paths
-        self.output_paths = output_paths
+    def __init__(self, input_path: str, output_path: str, ground_truth_path: str = None,
+                 population_size: int = 20, generations: int = 50):
+        self.input_path = input_path
+        self.output_path = output_path
         
-        # Load all input images
-        self.current_images = []
-        for path in input_paths:
-            img = cv2.imread(path)
-            if img is None:
-                raise ValueError(f"Could not load image from {path}")
-            self.current_images.append(img)
+        # Load input image
+        self.current_image = cv2.imread(input_path)
+        if self.current_image is None:
+            raise ValueError(f"Could not load image from {input_path}")
         
-        # Load all ground truths
-        self.ground_truths = []
-        if ground_truth_paths:
-            for path in ground_truth_paths:
-                try:
-                    with open(path, 'r', encoding='utf-8') as f:
-                        self.ground_truths.append(f.read())
-                except FileNotFoundError:
-                    if path != 'dummy':  # Ignore error for dummy path
-                        raise
-        
+        # Load ground truth
+        self.ground_truth = None
+        if ground_truth_path:
+            try:
+                with open(ground_truth_path, 'r', encoding='utf-8') as f:
+                    self.ground_truth = f.read()
+            except FileNotFoundError:
+                if ground_truth_path != 'dummy':  # Ignore error for dummy path
+                    raise
+
         self.population_size = population_size
         self.generations = generations
         self.n_rules = 9
@@ -48,7 +44,7 @@ class GeneticAlgorithm:
     
     def int_to_binary(self, number: int) -> str:
         """Mengkonversi integer ke binary string 4-bit"""
-        return format(number, '04b')  # 4 bit karena max rule adalah 9 (butuh 4 bit)
+        return format(number, '04b')  # 4 bit karena max rule adalah 15 (butuh 4 bit)
     
     def binary_to_int(self, binary: str) -> int:
         """Mengkonversi binary string ke integer"""
@@ -86,30 +82,25 @@ class GeneticAlgorithm:
     
     @lru_cache(maxsize=1000)
     def calculate_fitness(self, individual_tuple: tuple) -> float:
-        """Cached version of fitness calculation for multiple images"""
+        """Cached version of fitness calculation for single image"""
         individual = list(individual_tuple)
-        total_fitness = 0
+        current_image = self.current_image.copy()
         
-        for idx, current_image in enumerate(self.current_images):
-            current_image = current_image.copy()
-            
-            # Apply rules sequentially without saving intermediate files
-            for rule_num in individual:
-                rule_processor = Rule(None, None)
-                current_image = rule_processor.run(rule_num, current_image)
-            
-            # Perform OCR
-            tesseract = Tesseract(None, self.output_paths[idx])
-            if self.ground_truths:
-                tesseract.set_ground_truth(self.ground_truths[idx])
-            tesseract.tesseract(current_image)
-            
-            wer, cer = tesseract.get_test()
-            error_rate = 0.3 * wer + 0.7 * cer
-            total_fitness += np.exp(-error_rate)
+        # Apply rules sequentially without saving intermediate files
+        for rule_num in individual:
+            rule_processor = Rule(None, None)
+            current_image = rule_processor.run(rule_num, current_image)
         
-        # Return average fitness across all images
-        return total_fitness / len(self.current_images)
+        # Perform OCR
+        tesseract = Tesseract(None, self.output_path)
+        if self.ground_truth:
+            tesseract.set_ground_truth(self.ground_truth)
+        tesseract.tesseract(current_image)
+        
+        metrics = tesseract.get_test()
+        # Use WER and CER from metrics dictionary
+        error_rate = 0.3 * metrics['WER'] + 0.7 * metrics['CER']
+        return np.exp(-error_rate)
 
     def fitness(self, individual: List[int]) -> float:
         """Wrapper for cached fitness calculation"""
@@ -269,13 +260,13 @@ class GeneticAlgorithm:
         
         # Calculate WER and CER if ground truth is available
         metrics = {}
-        if hasattr(self, 'ground_truths') and self.ground_truths:
-            tesseract.set_ground_truth(self.ground_truths[0])
-            wer, cer = tesseract.get_test()
+        if hasattr(self, 'ground_truth') and self.ground_truth:
+            tesseract.set_ground_truth(self.ground_truth)
+            test_metrics = tesseract.get_test()
             metrics = {
                 'text': ocr_result,
-                'wer': wer * 100,  # Convert to percentage
-                'cer': cer * 100   # Convert to percentage
+                'wer': round(test_metrics['WER'], 4),
+                'cer': round(test_metrics['CER'], 4)
             }
         else:
             metrics = {'text': ocr_result}
@@ -346,55 +337,35 @@ class GeneticAlgorithm:
         print(f"Final best fitness: {best_fitness:.4f}")
 
         # Calculate final metrics for best sequence
-        current_image = None
-        for i, rule in enumerate(best_sequence):
-            if i == 0:
-                rule_processor = Rule(self.input_paths[0], f"temp_image_final_{i}.jpg")
-            else:
-                rule_processor = Rule(image_path_result, f"temp_image_final_{i}.jpg")
-            current_image = rule_processor.run(rule)
-            image_path_result = f"temp_image_final_{i}.jpg"
-            cv2.imwrite(image_path_result, current_image)
+        current_image = self.current_image.copy()
+        for rule in best_sequence:
+            rule_processor = Rule(None, None)
+            current_image = rule_processor.run(rule, current_image)
         
-        tesseract = Tesseract(self.input_paths[0], self.output_paths[0])
-        tesseract.set_ground_truth(self.ground_truths[0])
+        tesseract = Tesseract(self.input_path, self.output_path)
+        if self.ground_truth:
+            tesseract.set_ground_truth(self.ground_truth)
         tesseract.tesseract(current_image)
-        wer, cer = tesseract.get_test()
+        test_metrics = tesseract.get_test()
         
         metrics = {
-            'wer': wer * 100,  # Convert to percentage
-            'cer': cer * 100,  # Convert to percentage
-            'fitness': best_fitness
+            'wer': round(test_metrics['WER'], 4),
+            'cer': round(test_metrics['CER'], 4),
+            'fitness': round(best_fitness, 4)
         }
         print(metrics)
 
-        # Simpan sequence terbaik ke atribut class
+        # Save best sequence
         self.best_sequence = best_sequence
         
         return best_sequence, metrics
 
 if __name__ == "__main__":
-    # # Training dengan multiple gambar
-    # input_paths = [
-    #     'input_path/image1.png',
-    #     'input_path/image2.png',
-    #     'input_path/image3.png'
-    # ]
-    # output_paths = [
-    #     'output_path/result1.txt',
-    #     'output_path/result2.txt',
-    #     'output_path/result3.txt'
-    # ]
-    # ground_truth_paths = [
-    #     'ground_truth/image1.txt',
-    #     'ground_truth/image2.txt',
-    #     'ground_truth/image3.txt'
-    # ]
-    
+    # Training dengan single gambar
     # ga = GeneticAlgorithm(
-    #     input_paths=input_paths,
-    #     output_paths=output_paths,
-    #     ground_truth_paths=ground_truth_paths,
+    #     input_path='input_path/image1.png',
+    #     output_path='output_path/result.txt',
+    #     ground_truth_path='ground_truth/image1.txt',
     #     population_size=20,
     #     generations=50
     # )
@@ -403,14 +374,13 @@ if __name__ == "__main__":
 
     # Prediksi
     predictor = GeneticAlgorithm(
-        input_paths=['input_path/image1.png'],
-        output_paths=['output_path/result.txt'],
-        ground_truth_paths=['ground_truth/image1.txt']
+        input_path='input_path/image5.png',
+        output_path='output_path/result.txt',
+        ground_truth_path='ground_truth/image5.txt'
     )
     predictor.load_model('ga_model.json')
-    result = predictor.predict('input_path/image1.png')
-    # simpan hasil prediksi ke file
+    result = predictor.predict('input_path/image5.png')
     with open('output_path/result_predict.txt', 'w') as f:
-        f.write(result['text'])  # Extract the text from the result dictionary
+        f.write(result['text'])
 
     print(result)

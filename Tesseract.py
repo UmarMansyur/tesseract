@@ -22,13 +22,10 @@ class Tesseract:
     
   def tesseract(self, image_output):
     try:
-        text = pytesseract.image_to_string(image_output, lang='vie')
-        # text = text.encode('ascii', 'ignore').decode('ascii')
+        text = pytesseract.image_to_string(image_output, lang='vie+ind')
         self.ocr_result = text
-        # Simpan hasil OCR ke file
         with open('ocr_result.txt', 'a', encoding='utf-8') as file:
             file.write(text + '\n')
-            
         return text
     except Exception as e:
         print(f"Error during OCR: {e}")
@@ -50,13 +47,30 @@ class Tesseract:
     # Compute Levenshtein distance (character level)
     lev_distance = distance(gt_text, ocr_text)
 
-    # Compute Word Error Rate (WER) with preprocessed text
+    # Compute Word Error Rate (WER)
     result_wer = wer(reference=gt_text, hypothesis=ocr_text)
 
     # Compute Character Error Rate (CER)
     result_cer = lev_distance / len(gt_text) if gt_text else 0
 
-    return result_wer, result_cer
+    # Compute Word Accuracy Rate (WAR)
+    correct_words = sum(1 for gt, ocr in zip(gt_words, ocr_words) if gt == ocr)
+    result_war = correct_words / len(gt_words) if gt_words else 0
+
+    # Compute Character Accuracy Rate (CAR)
+    result_car = 1 - result_cer
+
+    # Compute Word Recognition Rate (WRR)
+    result_wrr = 1 - result_wer
+
+    return {
+        'WER': result_wer,
+        'CER': result_cer,
+        'WAR': result_war,
+        'CAR': result_car,
+        'WRR': result_wrr,
+        'Levenshtein': lev_distance
+    }
 
   def run(self, rule: int = 1, ground_truth: str = None):
     rule_processor = Rule(self.input_path, self.output_path)
