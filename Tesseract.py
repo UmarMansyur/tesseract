@@ -1,88 +1,115 @@
 import pytesseract
-from Levenshtein import distance
-from jiwer import wer
-from Rule import Rule
-
+from typing import Tuple, Optional
+import numpy as np
+import jiwer
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 
 class Tesseract:
-  def __init__(self, input_path: str, output_path: str):
-    self.input_path = input_path
-    self.output_path = output_path
-    self.ground_truth = None
-    self.ocr_result = None
+    def __init__(self, input_path: str = None, output_path: str = None):
+        self.input_path = input_path
+        self.output_path = output_path
+        self.ground_truth = None
+        self.predicted_text = None
+
+    def set_ground_truth(self, ground_truth: str):
+        """Set ground truth text for comparison"""
+        self.ground_truth = ground_truth
+      
     
-  def set_input_path(self, input_path: str):
-    self.input_path = input_path
-    
-  def set_ground_truth(self, ground_truth: str):
-    self.ground_truth = ground_truth
-    
-  def set_ocr_result(self, ocr_result: str):
-    self.ocr_result = ocr_result
-    
-  def tesseract(self, image_output):
-    try:
-        text = pytesseract.image_to_string(image_output, lang='vie+ind')
-        self.ocr_result = text
-        with open('ocr_result.txt', 'a', encoding='utf-8') as file:
-            file.write(text + '\n')
+    def original_tesseract(self, image) -> str:
+        """Perform OCR on the image and return the text"""
+        text = pytesseract.image_to_string(image, lang='eng')
         return text
-    except Exception as e:
-        print(f"Error during OCR: {e}")
-        return None
 
-  def get_test(self):
-    # Ensure both texts are not None and convert to strings
-    if self.ground_truth is None or self.ocr_result is None:
-        raise ValueError("Both ground truth and OCR result must be set")
-    
-    # Preprocess texts: convert to string, strip whitespace, and ensure single line
-    gt_text = str(self.ground_truth).strip().replace('\n', ' ')
-    ocr_text = str(self.ocr_result).strip().replace('\n', ' ')
-    
-    # Split ground truth and OCR result into words
-    gt_words = gt_text.split()
-    ocr_words = ocr_text.split()
+    def tesseract(self, image) -> str:
+        """Perform OCR on the image and return the text"""
+        try:
+            # bahasa sundanese
+            text = pytesseract.image_to_string(image, lang='eng')
+            # Perform OCR
+            self.predicted_text = ' '.join(text.lower().split())
+            
+            # Save to output file if path is provided
+            if self.output_path:
+                with open(self.output_path, 'w', encoding='utf-8') as f:
+                    f.write(self.predicted_text)
+            
+            return self.predicted_text
+        except Exception as e:
+            print(f"Error during OCR: {e}")
+            return ""
 
-    # Compute Levenshtein distance (character level)
-    lev_distance = distance(gt_text, ocr_text)
+    def get_test(self) -> Tuple[float, float]:
+        """Calculate WER and CER if ground truth is available"""
+        if self.ground_truth is None or self.predicted_text is None:
+            return 0.0, 0.0  # Return zeros if no ground truth or prediction
 
-    # Compute Word Error Rate (WER)
-    result_wer = wer(reference=gt_text, hypothesis=ocr_text)
+        try:
+            transforms = jiwer.Compose([
+              jiwer.ToLowerCase(),
+              jiwer.RemoveWhiteSpace(replace_by_space=True),
+              jiwer.RemoveMultipleSpaces(),
+              jiwer.Strip()
+            ])
+            
+            truth_processed = transforms(self.ground_truth)
+            pred_processed = transforms(self.predicted_text)
+            
+            # Calculate WER
+            wer = jiwer.wer(truth_processed, pred_processed)
+            
+            # Calculate CER
+            cer = jiwer.cer(truth_processed, pred_processed)
+            
+            return wer, cer
+        except Exception as e:
+            print(f"Error calculating metrics: {e}")
+            return 0.0, 0.0
 
-    # Compute Character Error Rate (CER)
-    result_cer = lev_distance / len(gt_text) if gt_text else 0
+    def calculate_word_level_metrics(self) -> Tuple[float, float, float, float]:
+        """Calculate accuracy, precision, recall, and F1 score at word level"""
+        if self.ground_truth is None or self.predicted_text is None:
+            return 0.0, 0.0, 0.0, 0.0
 
-    # Compute Word Accuracy Rate (WAR)
-    correct_words = sum(1 for gt, ocr in zip(gt_words, ocr_words) if gt == ocr)
-    result_war = correct_words / len(gt_words) if gt_words else 0
+        try:
+            ground_truth_clean = ' '.join(self.ground_truth.lower().split())
+            predicted_text_clean = ' '.join(self.predicted_text.lower().split())
+            # Split texts into words
+            ground_truth_words = ground_truth_clean.split()  
+            predicted_words = predicted_text_clean.split()
 
-    # Compute Character Accuracy Rate (CAR)
-    result_car = 1 - result_cer
+            # Pad the shorter list with empty strings to match lengths
+            max_length = max(len(ground_truth_words), len(predicted_words))
+            ground_truth_words.extend([''] * (max_length - len(ground_truth_words)))
+            predicted_words.extend([''] * (max_length - len(predicted_words)))
 
-    # Compute Word Recognition Rate (WRR)
-    result_wrr = 1 - result_wer
+            # Create binary lists for exact word matches
+            y_true = [1 if word != '' else 0 for word in ground_truth_words]
+            y_pred = [1 if gt == pred and gt != '' else 0 
+                     for gt, pred in zip(ground_truth_words, predicted_words)]
 
-    return {
-        'WER': result_wer,
-        'CER': result_cer,
-        'WAR': result_war,
-        'CAR': result_car,
-        'WRR': result_wrr,
-        'Levenshtein': lev_distance
-    }
+            # Calculate metrics
+            accuracy = accuracy_score(y_true, y_pred)
+            precision = precision_score(y_true, y_pred, zero_division=0)
+            recall = recall_score(y_true, y_pred, zero_division=0)
+            f1 = f1_score(y_true, y_pred, zero_division=0)
 
-  def run(self, rule: int = 1, ground_truth: str = None):
-    rule_processor = Rule(self.input_path, self.output_path)
-    processed_image = rule_processor.run(rule)
-    
-    # Set ground truth jika diberikan
-    if ground_truth:
-        self.set_ground_truth(ground_truth)
+            return accuracy, precision, recall, f1
+        except Exception as e:
+            print(f"Error calculating word-level metrics: {e}")
+            return 0.0, 0.0, 0.0, 0.0
+
+    def get_metrics(self) -> dict:
+        """Get all available metrics"""
+        wer, cer = self.get_test()
+        accuracy, precision, recall, f1 = self.calculate_word_level_metrics()
         
-    # Jalankan OCR
-    ocr_result = self.tesseract(processed_image)
-    
-    # Jika ingin langsung mendapatkan metrics
-    if self.ground_truth and ocr_result:
-        return self.get_test()
+        return {
+            'wer': wer * 100,  # Convert to percentage
+            'cer': cer * 100,  # Convert to percentage
+            'accuracy': accuracy * 100,
+            'precision': precision * 100,
+            'recall': recall * 100,
+            'f1_score': f1 * 100,
+            'predicted_text': self.predicted_text
+        }

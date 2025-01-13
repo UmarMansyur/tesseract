@@ -258,24 +258,33 @@ class GeneticAlgorithm:
         tesseract = Tesseract(image_path, output_path)
         ocr_result = tesseract.tesseract(current_image)
         
-        # Calculate WER and CER if ground truth is available
+        # Enhance metrics output
         metrics = {}
         if hasattr(self, 'ground_truth') and self.ground_truth:
             tesseract.set_ground_truth(self.ground_truth)
             test_metrics = tesseract.get_test()
             metrics = {
                 'text': ocr_result,
-                'wer': round(test_metrics['WER'], 4),
-                'cer': round(test_metrics['CER'], 4)
+                'WER': round(test_metrics['WER'] * 100, 2),
+                'CER': round(test_metrics['CER'] * 100, 2),
+                'Akurasi': round((1 - test_metrics['CER']) * 100, 2),
+                'Presisi': round(test_metrics.get('Precision', 0) * 100, 2),
+                'Recall': round(test_metrics.get('Recall', 0) * 100, 2),
+                'F1-Score': round(test_metrics.get('F1', 0) * 100, 2)
             }
         else:
             metrics = {'text': ocr_result}
         
-        # Save metrics to file
+        # Save metrics in tabular format
         metrics_path = output_path.rsplit('.', 1)[0] + '_metrics.txt'
         with open(metrics_path, 'w') as f:
-            for key, value in metrics.items():
-                f.write(f"{key}: {value}\n")
+            # Write header
+            f.write(f"{'WER':^10}{'CER':^10}{'Akurasi':^10}{'Presisi':^10}{'Recall':^10}{'F1-Score':^10}\n")
+            f.write('-' * 60 + '\n')
+            # Write values
+            f.write(f"{metrics.get('WER', '-'):^10.2f}{metrics.get('CER', '-'):^10.2f}"
+                   f"{metrics.get('Akurasi', '-'):^10.2f}{metrics.get('Presisi', '-'):^10.2f}"
+                   f"{metrics.get('Recall', '-'):^10.2f}{metrics.get('F1-Score', '-'):^10.2f}\n")
         
         return metrics
 

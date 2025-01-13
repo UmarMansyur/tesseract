@@ -6,6 +6,7 @@ from typing import List, Tuple, Dict
 import cv2
 from multiprocessing import Pool
 from functools import lru_cache
+from sklearn.metrics import precision_recall_fscore_support
 
 class GeneticAlgorithm:
     def __init__(self, input_paths: List[str], output_paths: List[str], ground_truth_paths: List[str] = None,
@@ -247,6 +248,28 @@ class GeneticAlgorithm:
         self.n_rules = model_data['n_rules']
         self.sequence_length = model_data['sequence_length']
     
+    def calculate_metrics(self, predicted_text: str, ground_truth: str) -> Dict:
+        """Calculate precision, recall, F1 score, WER, and CER"""
+        # Convert texts to word lists
+        pred_words = predicted_text.split()
+        true_words = ground_truth.split()
+        
+        # Convert to binary classification format for sklearn
+        all_words = list(set(pred_words + true_words))
+        y_true = [1 if word in true_words else 0 for word in all_words]
+        y_pred = [1 if word in pred_words else 0 for word in all_words]
+        
+        # Calculate precision, recall, and f1
+        precision, recall, f1, _ = precision_recall_fscore_support(
+            y_true, y_pred, average='binary', zero_division=0
+        )
+        
+        return {
+            'precision': precision * 100,  # Convert to percentage
+            'recall': recall * 100,
+            'f1': f1 * 100
+        }
+
     def predict(self, image_path: str, output_path: str = None) -> Dict:
         """Menggunakan model untuk memprediksi gambar baru"""
         if self.best_sequence is None:
@@ -272,10 +295,17 @@ class GeneticAlgorithm:
         if hasattr(self, 'ground_truths') and self.ground_truths:
             tesseract.set_ground_truth(self.ground_truths[0])
             wer, cer = tesseract.get_test()
+            
+            # Calculate additional metrics
+            additional_metrics = self.calculate_metrics(ocr_result, self.ground_truths[0])
+            
             metrics = {
                 'text': ocr_result,
                 'wer': wer * 100,  # Convert to percentage
-                'cer': cer * 100   # Convert to percentage
+                'cer': cer * 100,   # Convert to percentage
+                'precision': additional_metrics['precision'],
+                'recall': additional_metrics['recall'],
+                'f1': additional_metrics['f1']
             }
         else:
             metrics = {'text': ocr_result}
@@ -358,13 +388,19 @@ class GeneticAlgorithm:
         
         tesseract = Tesseract(self.input_paths[0], self.output_paths[0])
         tesseract.set_ground_truth(self.ground_truths[0])
-        tesseract.tesseract(current_image)
+        ocr_result = tesseract.tesseract(current_image)
         wer, cer = tesseract.get_test()
+        
+        # Calculate additional metrics
+        additional_metrics = self.calculate_metrics(ocr_result, self.ground_truths[0])
         
         metrics = {
             'wer': wer * 100,  # Convert to percentage
             'cer': cer * 100,  # Convert to percentage
-            'fitness': best_fitness
+            'fitness': best_fitness,
+            'precision': additional_metrics['precision'],
+            'recall': additional_metrics['recall'],
+            'f1': additional_metrics['f1']
         }
         print(metrics)
 
@@ -372,6 +408,20 @@ class GeneticAlgorithm:
         self.best_sequence = best_sequence
         
         return best_sequence, metrics
+    
+    def display_metrics_table(self, result):
+        """
+        Display metrics in a formatted table
+        """
+        print("\n" + "="*40)
+        print(f"{'Metrik':<25}{'Nilai (%)':<15}")
+        print("="*40)
+        print(f"{'WER (Word Error Rate)':<25}{result['wer']:<15.2f}")
+        print(f"{'CER (Character Error Rate)':<25}{result['cer']:<15.2f}")
+        print(f"{'Precision':<25}{result['precision']:<15.2f}")
+        print(f"{'Recall':<25}{result['recall']:<15.2f}")
+        print(f"{'F1-Score':<25}{result['f1']:<15.2f}")
+        print("="*40)
 
 if __name__ == "__main__":
     # # Training dengan multiple gambar
@@ -403,14 +453,22 @@ if __name__ == "__main__":
 
     # Prediksi
     predictor = GeneticAlgorithm(
-        input_paths=['input_path/image1.png'],
+        input_paths=['input_path/image10.png'],
         output_paths=['output_path/result.txt'],
-        ground_truth_paths=['ground_truth/image1.txt']
+        ground_truth_paths=['ground_truth/image10.txt']
     )
     predictor.load_model('ga_model.json')
-    result = predictor.predict('input_path/image1.png')
+    result = predictor.predict('input_path/image10.png')
     # simpan hasil prediksi ke file
     with open('output_path/result_predict.txt', 'w') as f:
         f.write(result['text'])  # Extract the text from the result dictionary
 
-    print(result)
+
+    predictor.display_metrics_table(result)
+    # print({
+    #     'wer': result['wer'],
+    #     'cer': result['cer'],
+    #     'precision': result['precision'],
+    #     'recall': result['recall'],
+    #     'f1': result['f1']
+    # })
