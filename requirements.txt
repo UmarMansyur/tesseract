@@ -1,8 +1,6 @@
-numpy
-opencv-python
-Pillow
 click==8.1.7
 jiwer==3.0.5
+joblib==1.4.2
 Levenshtein==0.26.1
 numpy==2.2.0
 opencv-python==4.10.0.84
@@ -11,3 +9,6 @@ pillow==11.0.0
 pytesseract==0.3.13
 python-Levenshtein==0.26.1
 RapidFuzz==3.10.1
+scikit-learn==1.6.1
+scipy==1.15.1
+threadpoolctl==3.5.0
